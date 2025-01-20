@@ -460,17 +460,22 @@ public class RecordAccumulator {
                         // Note that entries are currently not removed from batches when deque is empty.
                         unknownLeaderTopics.add(part.topic());
                     } else if (!readyNodes.contains(leader) && !isMuted(part)) {
+                        // 该 ProducerBatch 等待的时长，等于当前时间-lastAttemptMs
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
+                        // 如果当前 ProducerBatch 的尝试次数大于0且等待时间小于重试间隔时间，则backingOff=true，表明该 Batch 还没有准备好
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
+                        // sender 子线程发送消息需要等待的时长，如果backingOff为true，说明是重试的，需要等待重试间隔的时间，如果为false，则需要等待linger.ms的时间
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        // 该 batch 是否已经写满？
                         boolean full = deque.size() > 1 || batch.isFull();
+                        // 等待时间是否已经超过了需要等待时间？
                         boolean expired = waitedTimeMs >= timeToWaitMs;
                         boolean transactionCompleting = transactionManager != null && transactionManager.isCompleting();
-                        boolean sendable = full
-                            || expired
-                            || exhausted
-                            || closed
-                            || flushInProgress()
+                        boolean sendable = full // 满了就发
+                            || expired // 时间到了就发
+                            || exhausted // 线程申请 batch 时，内存不足；即存在等待分配内存的线程，当前需要尽快发送以释放内存给等待中的线程
+                            || closed // 生产者客户端调用了 close() 方法
+                            || flushInProgress() // 生产者客户端调用了 flush() 方法
                             || transactionCompleting;
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);

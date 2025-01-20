@@ -20,10 +20,14 @@ package org.apache.kafka.common;
  * This is used to describe per-partition state in the MetadataResponse.
  */
 public class PartitionInfo {
+    // 所属topic
     private final String topic;
+    // partition编号
     private final int partition;
+    // leader分区所在节点
     private final Node leader;
     private final Node[] replicas;
+    // ISR列表
     private final Node[] inSyncReplicas;
     private final Node[] offlineReplicas;
 
