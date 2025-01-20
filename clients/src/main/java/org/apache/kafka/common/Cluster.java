@@ -35,18 +35,30 @@ import java.util.Set;
 public final class Cluster {
 
     private final boolean isBootstrapConfigured;
+    // broker所有的节点信息
     private final List<Node> nodes;
+    //
     private final Set<String> unauthorizedTopics;
+    // 无效的topic
     private final Set<String> invalidTopics;
+    // 内部tpic
     private final Set<String> internalTopics;
+    // controller节点信息
     private final Node controller;
+    // 根据TopicPartition获取整个分区的信息
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    // 根据topic获取其下所有分区信息
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    // 根据topic获取其下所有可用分区的信息
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+    // 根据brokerId获取其下所有leader分区信息
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    // 根据brokerId获取broker信息
     private final Map<Integer, Node> nodesById;
     private final ClusterResource clusterResource;
+    // topicName => topicUuid
     private final Map<String, Uuid> topicIds;
+    // topicUuid => topicName
     private final Map<Uuid, String> topicNames;
 
     /**

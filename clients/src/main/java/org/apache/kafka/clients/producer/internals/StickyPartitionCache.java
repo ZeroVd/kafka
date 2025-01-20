@@ -30,6 +30,7 @@ import org.apache.kafka.common.utils.Utils;
  * partition for any given topic. This class should not be used externally. 
  */
 public class StickyPartitionCache {
+    // topicName => partitionId
     private final ConcurrentMap<String, Integer> indexCache;
     public StickyPartitionCache() {
         this.indexCache = new ConcurrentHashMap<>();

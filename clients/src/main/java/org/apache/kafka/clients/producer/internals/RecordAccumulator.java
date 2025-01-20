@@ -77,6 +77,8 @@ public class RecordAccumulator {
     private final BufferPool free;
     private final Time time;
     private final ApiVersions apiVersions;
+    // topicPartition => recordBatchDeque
+    // 每个topicPartition对应一个recordBatch的队列
     private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
     private final IncompleteBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
@@ -188,15 +190,19 @@ public class RecordAccumulator {
                                      long nowMs) throws InterruptedException {
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
+        // 记录消息累加器正在添加消息的线程数量
         appendsInProgress.incrementAndGet();
         ByteBuffer buffer = null;
         if (headers == null) headers = Record.EMPTY_HEADERS;
         try {
             // check if we have an in-progress batch
+            // 获取或创建该tp的recordBatch队列
             Deque<ProducerBatch> dq = getOrCreateDeque(tp);
             synchronized (dq) {
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
+                // 尝试添加到recordBatch中
+                // 这里是尝试添加到已创建的recordBatch中，如果不存在或已满，则会添加失败
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq, nowMs);
                 if (appendResult != null)
                     return appendResult;
@@ -211,6 +217,7 @@ public class RecordAccumulator {
             byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, tp.topic(), tp.partition(), maxTimeToBlock);
+            // 分配recordBatch的内存，最小为16kb，当为16kb时，可以从内存池中复用，如果大于16kb则会使用使用非池话内存；注意会存在池化内存和非池化内存的转换；
             buffer = free.allocate(size, maxTimeToBlock);
 
             // Update the current time in case the buffer allocation blocked above.
@@ -220,12 +227,14 @@ public class RecordAccumulator {
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
 
+                // 可能其他线程也要向该tp内添加消息，已经创建完成一个该tp下的recordBatch，可以直接复用，将该消息添加进去
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq, nowMs);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
                     return appendResult;
                 }
 
+                // 这里新建一个RecordBatch
                 MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer, maxUsableMagic);
                 ProducerBatch batch = new ProducerBatch(tp, recordsBuilder, nowMs);
                 FutureRecordMetadata future = Objects.requireNonNull(batch.tryAppend(timestamp, key, value, headers,
@@ -460,17 +469,22 @@ public class RecordAccumulator {
                         // Note that entries are currently not removed from batches when deque is empty.
                         unknownLeaderTopics.add(part.topic());
                     } else if (!readyNodes.contains(leader) && !isMuted(part)) {
+                        // 该 ProducerBatch 等待的时长，等于当前时间-lastAttemptMs
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
+                        // 如果当前 ProducerBatch 的尝试次数大于0且等待时间小于重试间隔时间，则backingOff=true，表明该 Batch 还没有准备好
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
+                        // sender 子线程发送消息需要等待的时长，如果backingOff为true，说明是重试的，需要等待重试间隔的时间，如果为false，则需要等待linger.ms的时间
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        // 该 batch 是否已经写满？
                         boolean full = deque.size() > 1 || batch.isFull();
+                        // 等待时间是否已经超过了需要等待时间？
                         boolean expired = waitedTimeMs >= timeToWaitMs;
                         boolean transactionCompleting = transactionManager != null && transactionManager.isCompleting();
-                        boolean sendable = full
-                            || expired
-                            || exhausted
-                            || closed
-                            || flushInProgress()
+                        boolean sendable = full // 满了就发
+                            || expired // 时间到了就发
+                            || exhausted // 线程申请 batch 时，内存不足；即存在等待分配内存的线程，当前需要尽快发送以释放内存给等待中的线程
+                            || closed // 生产者客户端调用了 close() 方法
+                            || flushInProgress() // 生产者客户端调用了 flush() 方法
                             || transactionCompleting;
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
@@ -545,6 +559,7 @@ public class RecordAccumulator {
         List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
         List<ProducerBatch> ready = new ArrayList<>();
         /* to make starvation less likely this loop doesn't start at 0 */
+        // 因为这里需要遍历partition，因此不从0开始，防止编号靠后的partition不能被发送
         int start = drainIndex = drainIndex % parts.size();
         do {
             PartitionInfo part = parts.get(drainIndex);
@@ -566,6 +581,7 @@ public class RecordAccumulator {
                     continue;
 
                 // first != null
+                // 在重试，且未达到下次重试时间
                 boolean backoff = first.attempts() > 0 && first.waitedTimeMs(now) < retryBackoffMs;
                 // Only drain the batch if it is not during backoff period.
                 if (backoff)
@@ -632,10 +648,12 @@ public class RecordAccumulator {
             return Collections.emptyMap();
 
         Map<Integer, List<ProducerBatch>> batches = new HashMap<>();
+        // 遍历要发送消息的broker节点，按照节点维度依次发送
         for (Node node : nodes) {
             List<ProducerBatch> ready = drainBatchesForOneNode(cluster, node, maxSize, now);
             batches.put(node.id(), ready);
         }
+        // 返回 brokerId => ProducerBatchList
         return batches;
     }
 

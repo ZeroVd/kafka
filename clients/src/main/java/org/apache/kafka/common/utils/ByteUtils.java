@@ -299,8 +299,12 @@ public final class ByteUtils {
      * @param out The output to write to
      */
     public static void writeUnsignedVarint(int value, DataOutput out) throws IOException {
+        // 0xffffff80 = 11111111111111111111111110000000
+        // 判断高于7位是否还有数据
         while ((value & 0xffffff80) != 0L) {
+            // 拿到后7位
             byte b = (byte) ((value & 0x7f) | 0x80);
+            // 写入
             out.writeByte(b);
             value >>>= 7;
         }
