@@ -975,6 +975,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
             int serializedSize = AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
                     compressionType, serializedKey, serializedValue, headers);
+            // 检查消息大小，确保没有超过 max.request.size 和 buffer.memory(producer所能使用的发送缓冲区大小) 的值
             ensureValidRecordSize(serializedSize);
             long timestamp = record.timestamp() == null ? nowMs : record.timestamp();
             if (log.isTraceEnabled()) {
@@ -983,9 +984,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // producer callback will make sure to call both 'callback' and interceptor callback
             Callback interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
 
+            // 添加到 RecordAccumulator 中，在这里会有一个sender线程去发送消息
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, true, nowMs);
 
+            // 需要创建新recordBatch，针对黏性策略分区器，这里会选择一个新的partition，在该partition创建一个recordBatch
             if (result.abortForNewBatch) {
                 int prevPartition = partition;
                 partitioner.onNewBatch(record.topic(), cluster, prevPartition);

@@ -358,7 +358,9 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        // brokerId => producerBatchList，根据brokerId获取所有需要发送到该节点的producerBatch
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
+        // 添加到InFlatBatches中
         addToInflightBatches(batches);
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
@@ -369,6 +371,7 @@ public class Sender implements Runnable {
         }
 
         accumulator.resetNextBatchExpiryTime();
+        // 获取已经到达发送时间的producerBatch
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
         expiredBatches.addAll(expiredInflightBatches);
