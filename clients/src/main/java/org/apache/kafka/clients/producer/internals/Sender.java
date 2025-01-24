@@ -371,7 +371,7 @@ public class Sender implements Runnable {
         }
 
         accumulator.resetNextBatchExpiryTime();
-        // 获取已经到达发送时间的producerBatch
+        // 从inFlightRequests中获取过期的producerBatch，即从创建开始计算，超过delivery.timeout.ms的消息
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
         expiredBatches.addAll(expiredInflightBatches);
@@ -408,6 +408,7 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
+        // 发送消息
         sendProduceRequests(batches, now);
         return pollTimeout;
     }
