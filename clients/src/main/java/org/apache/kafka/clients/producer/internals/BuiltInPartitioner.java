@@ -218,6 +218,13 @@ public class BuiltInPartitioner {
                 producedBytes, stickyBatchSize, enableSwitch);
         }
 
+        /**
+         * 当enableSwitch==true时，即当前tp的recordBatch已经被发送了（或者满了放不下，等待发送），为什么还要判断producedBytes >= stickyBatchSize才能切换？
+         * 这里主要是为了解决之前的粘性分区策略不够粘性的问题；
+         *
+         * 不再是每次创建recordBatch时切换分区，而是每个tp下生成batch.size字节消息后才切换分区
+         *
+         */
         if (producedBytes >= stickyBatchSize && enableSwitch || producedBytes >= stickyBatchSize * 2) {
             // We've produced enough to this partition, switch to next.
             StickyPartitionInfo newPartitionInfo = new StickyPartitionInfo(nextPartition(cluster));
