@@ -347,6 +347,8 @@ public class Sender implements Runnable {
         }
 
         // remove any nodes we aren't ready to send to
+        // 该版本粘性分区策略造成分配倾斜的原因就在这里，如果一个慢broker的inFlightRequest已经达到了5（默认），那么就会从readyNodes中删除该node
+        // 造成该node未满的batch仍然能够被添加数据，造成分配的倾斜；
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
