@@ -251,6 +251,7 @@ public class Fetcher<K, V> implements Closeable {
         // Update metrics in case there was an assignment change
         sensors.maybeUpdateAssignment(subscriptions);
 
+        // 将poll请求按照broker区分，broker(nodeId) => FetchRequestData
         Map<Node, FetchSessionHandler.FetchRequestData> fetchRequestMap = prepareFetchRequests();
         for (Map.Entry<Node, FetchSessionHandler.FetchRequestData> entry : fetchRequestMap.entrySet()) {
             final Node fetchTarget = entry.getKey();
@@ -261,6 +262,7 @@ public class Fetcher<K, V> implements Closeable {
             } else {
                 maxVersion = ApiKeys.FETCH.latestVersion();
             }
+            // 封装出来发送给该broker的FetchRequest
             final FetchRequest.Builder request = FetchRequest.Builder
                     .forConsumer(maxVersion, this.maxWaitMs, this.minBytes, data.toSend())
                     .isolationLevel(isolationLevel)
@@ -273,11 +275,14 @@ public class Fetcher<K, V> implements Closeable {
             if (log.isDebugEnabled()) {
                 log.debug("Sending {} {} to broker {}", isolationLevel, data.toString(), fetchTarget);
             }
+            
+            // 调用client发送请求到目标broker，注意这里并不是真正的发送请求，仅仅是封装为ClientRequest然后添加到了unsent队列中
             RequestFuture<ClientResponse> future = client.send(fetchTarget, request);
             // We add the node to the set of nodes with pending fetch requests before adding the
             // listener because the future may have been fulfilled on another thread (e.g. during a
             // disconnection being handled by the heartbeat thread) which will mean the listener
             // will be invoked synchronously.
+            // 添加到等待响应队列
             this.nodesWithPendingFetchRequests.add(entry.getKey().id());
             future.addListener(new RequestFutureListener<ClientResponse>() {
                 @Override
@@ -329,6 +334,7 @@ public class Fetcher<K, V> implements Closeable {
                                     Iterator<? extends RecordBatch> batches = FetchResponse.recordsOrFail(partitionData).batches().iterator();
                                     short responseVersion = resp.requestHeader().apiVersion();
 
+                                    // 将响应数据添加到 completedFetches 队列中
                                     completedFetches.add(new CompletedFetch(partition, partitionData,
                                             metricAggregator, batches, fetchOffset, responseVersion));
                                 }
@@ -651,6 +657,7 @@ public class Fetcher<K, V> implements Closeable {
 
         try {
             while (recordsRemaining > 0) {
+                // 如果nextLineFetch中没有数据或者已经被消费，尝试从completedFetches中解析
                 if (nextInLineFetch == null || nextInLineFetch.isConsumed) {
                     CompletedFetch records = completedFetches.peek();
                     if (records == null) break;
@@ -681,6 +688,7 @@ public class Fetcher<K, V> implements Closeable {
                     pausedCompletedFetches.add(nextInLineFetch);
                     nextInLineFetch = null;
                 } else {
+                    // 从nextInLineFetch中获取数据
                     List<ConsumerRecord<K, V>> records = fetchRecords(nextInLineFetch, recordsRemaining);
 
                     if (!records.isEmpty()) {

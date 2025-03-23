@@ -740,6 +740,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             int heartbeatIntervalMs = config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG);
 
             ApiVersions apiVersions = new ApiVersions();
+            // NetworkClient用于和Selector交互
             NetworkClient netClient = new NetworkClient(
                     new Selector(config.getLong(ConsumerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), metrics, time, metricGrpPrefix, channelBuilder, logContext),
                     this.metadata,
@@ -757,6 +758,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     apiVersions,
                     throttleTimeSensor,
                     logContext);
+            // 这个是consumer端对NetworkClient的再封装
             this.client = new ConsumerNetworkClient(
                     logContext,
                     netClient,
@@ -772,6 +774,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             );
 
             // no coordinator will be constructed for the default (null) group id
+            // 组协调器
             this.coordinator = !groupId.isPresent() ? null :
                 new ConsumerCoordinator(groupRebalanceConfig,
                         logContext,
@@ -786,6 +789,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                         config.getInt(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG),
                         this.interceptors,
                         config.getBoolean(ConsumerConfig.THROW_ON_FETCH_STABLE_OFFSET_UNSUPPORTED));
+            // fetcher是consumer端真正发送请求的类
             this.fetcher = new Fetcher<>(
                     logContext,
                     this.client,
@@ -1215,10 +1219,12 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws KafkaException if the rebalance callback throws exception
      */
     private ConsumerRecords<K, V> poll(final Timer timer, final boolean includeMetadataInTimeout) {
+        // consumer是线程不安全的，这里检查是否出现并发访问
         acquireAndEnsureOpen();
         try {
             this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs());
 
+            // 如果没有订阅topic，抛异常
             if (this.subscriptions.hasNoSubscriptionOrUserAssignment()) {
                 throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions");
             }
@@ -1226,6 +1232,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             do {
                 client.maybeTriggerWakeup();
 
+                // 判断是否需要更新元数据信息
                 if (includeMetadataInTimeout) {
                     // try to update assignment metadata BUT do not need to block on the timer for join group
                     updateAssignmentMetadataIfNeeded(timer, false);
@@ -1235,6 +1242,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     }
                 }
 
+                // 拉取数据
                 final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollForFetches(timer);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -1243,10 +1251,12 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     //
                     // NOTE: since the consumed position has already been updated, we must not allow
                     // wakeups or any other errors to be triggered prior to returning the fetched records.
+                    // 发起下一次拉取请求，防止下次poll是block主线程
                     if (fetcher.sendFetches() > 0 || client.hasPendingRequests()) {
                         client.transmitSends();
                     }
 
+                    // 执行拦截器
                     return this.interceptors.onConsume(new ConsumerRecords<>(records));
                 }
             } while (timer.notExpired());
@@ -1274,12 +1284,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 Math.min(coordinator.timeToNextPoll(timer.currentTimeMs()), timer.remainingMs());
 
         // if data is available already, return it immediately
+        // 获取fetcher中已经拉取到的数据，从nextInLineFetch中解析异步获取到的消息
         final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = fetcher.fetchedRecords();
         if (!records.isEmpty()) {
             return records;
         }
 
         // send any new fetches (won't resend pending fetches)
+        // fetcher已经没有待消费的数据，发送请求拉取数据
         fetcher.sendFetches();
 
         // We do not want to be stuck blocking in poll if we are missing some positions
@@ -1294,6 +1306,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         log.trace("Polling for fetches with timeout {}", pollTimeout);
 
         Timer pollTimer = time.timer(pollTimeout);
+        // 这里会将unsent队列中的数据通过NetworkClient设置到发送缓冲区，并设置读事件，之后会调用Selector的poll方法去发送请求
         client.poll(pollTimer, () -> {
             // since a fetch might be completed by the background thread, we need this poll condition
             // to ensure that we do not block unnecessarily in poll()

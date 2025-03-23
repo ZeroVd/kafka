@@ -22,7 +22,11 @@ import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 public class HeartbeatResponse extends AbstractResponse {
 

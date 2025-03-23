@@ -126,11 +126,14 @@ public class ConsumerNetworkClient implements Closeable {
                                               int requestTimeoutMs) {
         long now = time.milliseconds();
         RequestFutureCompletionHandler completionHandler = new RequestFutureCompletionHandler();
+        // 分装为ClientRequest，添加到unsent队列
+        // unsent队列是 broker => ConcurrentLinkedQueue<ClientRequest>
         ClientRequest clientRequest = client.newClientRequest(node.idString(), requestBuilder, now, true,
             requestTimeoutMs, completionHandler);
         unsent.put(node, clientRequest);
 
         // wakeup the client in case it is blocking in poll so that we can send the queued request
+        // 唤醒selector，应为多路复用时阻塞等待事件时只能响应读事件，如果要立即处理写事件（即发送请求）需要唤醒selector
         client.wakeup();
         return completionHandler.future;
     }
@@ -252,6 +255,7 @@ public class ConsumerNetworkClient implements Closeable {
             handlePendingDisconnects();
 
             // send all the requests we can send now
+            // 添加请求数据到发送缓冲区
             long pollDelayMs = trySend(timer.currentTimeMs());
 
             // check whether the poll is still needed by the caller. Note that if the expected completion
@@ -262,6 +266,7 @@ public class ConsumerNetworkClient implements Closeable {
                 long pollTimeout = Math.min(timer.remainingMs(), pollDelayMs);
                 if (client.inFlightRequestCount() == 0)
                     pollTimeout = Math.min(pollTimeout, retryBackoffMs);
+                // 发送数据，重新执行Selector的select发送扫描到写事件，发送请求
                 client.poll(pollTimeout, timer.currentTimeMs());
             } else {
                 client.poll(0, timer.currentTimeMs());

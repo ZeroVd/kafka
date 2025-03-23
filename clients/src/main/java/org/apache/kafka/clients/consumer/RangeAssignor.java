@@ -87,8 +87,10 @@ public class RangeAssignor extends AbstractPartitionAssignor {
     @Override
     public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
                                                     Map<String, Subscription> subscriptions) {
+        // topic => consumers
         Map<String, List<MemberInfo>> consumersPerTopic = consumersPerTopic(subscriptions);
 
+        // memberId => partitionId
         Map<String, List<TopicPartition>> assignment = new HashMap<>();
         for (String memberId : subscriptions.keySet())
             assignment.put(memberId, new ArrayList<>());
@@ -103,12 +105,16 @@ public class RangeAssignor extends AbstractPartitionAssignor {
 
             Collections.sort(consumersForTopic);
 
+            // 每个consumer的基本partition数量
             int numPartitionsPerConsumer = numPartitionsForTopic / consumersForTopic.size();
+            // 前consumersWithExtraPartition个consuemr多分配一个partition
             int consumersWithExtraPartition = numPartitionsForTopic % consumersForTopic.size();
 
             List<TopicPartition> partitions = AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic);
             for (int i = 0, n = consumersForTopic.size(); i < n; i++) {
+                // 起始编号
                 int start = numPartitionsPerConsumer * i + Math.min(i, consumersWithExtraPartition);
+                // 当前consumer的partition数量
                 int length = numPartitionsPerConsumer + (i + 1 > consumersWithExtraPartition ? 0 : 1);
                 assignment.get(consumersForTopic.get(i).memberId).addAll(partitions.subList(start, start + length));
             }

@@ -74,17 +74,21 @@ public class SubscriptionState {
 
     private final Logger log;
 
+    // 当前状态，未订阅，订阅主题，订阅正则主题，使用assigned
     private enum SubscriptionType {
         NONE, AUTO_TOPICS, AUTO_PATTERN, USER_ASSIGNED
     }
 
     /* the type of subscription */
+    // 订阅类型
     private SubscriptionType subscriptionType;
 
     /* the pattern user has requested */
+    // 正则订阅模式，对应AUTO_PATTERN
     private Pattern subscribedPattern;
 
     /* the list of topics the user has requested */
+    // 订阅的topic列表，对应AUTO_TOPICS
     private Set<String> subscription;
 
     /* The list of topics the group has subscribed to. This may include some topics which are not part
@@ -93,6 +97,7 @@ public class SubscriptionState {
     private Set<String> groupSubscription;
 
     /* the partitions that are currently assigned, note that the order of partition matters (see FetchBuilder for more details) */
+    // 记录分配的分区
     private final PartitionStates<TopicPartitionState> assignment;
 
     /* Default offset reset strategy */
@@ -762,12 +767,15 @@ public class SubscriptionState {
     private static class TopicPartitionState {
 
         private FetchState fetchState;
+        // 下一次要从broker端拉取的起始offset
         private FetchPosition position; // last consumed position
 
         private Long highWatermark; // the high watermark from last fetch
         private Long logStartOffset; // the log start offset
         private Long lastStableOffset;
+        // 是否暂停该tp
         private boolean paused;  // whether this partition has been paused by the user
+        // 重置position的策略
         private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting
         private Long nextRetryTimeMs;
         private Integer preferredReadReplica;
